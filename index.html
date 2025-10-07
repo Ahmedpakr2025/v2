@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+
+  <head>
+    <meta charset="UTF-8">
+    <title>Untitled</title>
+    <link rel="stylesheet" href="./style.css">
+
+  </head>
+    
+  <body>
+  <!--
+index.html
+Inventory / Permissions web app (Arabic RTL)
+Files:
+  - index.html  (this file, HTML only)
+  - styles.css  (CSS only)
+  - app.js      (JavaScript only)
+
+How to run:
+  1. Put these three files in the same folder.
+  2. Open index.html in any modern browser (no server required).
+  3. Use the app on desktop or mobile. All data persists to localStorage.
+
+Notes:
+  - Exports to "Excel" are implemented as CSV downloads (Excel can open CSV).
+  - PDF export uses a print-friendly window (client-side) — explained in app.js comments.
+  - Import from Excel expects a CSV file with headers: name,unit,type,group,initial_qty
+  - Backup/restore uses JSON file download/upload.
+-->
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>إدارة مخازن Intermaint</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div id="app" class="app-root">
+    <!-- Watermark is in CSS background -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-title">Intermaint</div>
+        <div class="brand-sub">إدارة مخازن انترمنت</div>
+      </div>
+      <nav class="top-actions">
+        <div class="btn-group">
+          <button id="exportBtn" class="btn small">تصدير</button>
+          <div class="dropdown" id="exportMenu" aria-hidden="true">
+            <button class="btn small" data-export="pdf">PDF</button>
+            <button class="btn small" data-export="excel">Excel</button>
+          </div>
+        </div>
+        <button id="importItemsBtn" class="btn small">استيراد من Excel</button>
+        <input id="importFile" type="file" accept=".csv,.xlsx,.xls" class="hidden">
+        <div class="btn-group">
+          <button id="backupBtn" class="btn small">نسخ احتياطي</button>
+          <div class="dropdown" id="backupMenu" aria-hidden="true">
+            <button class="btn small" id="backupExport">تصدير نسخة</button>
+            <button class="btn small" id="backupImport">استرجاع نسخة</button>
+          </div>
+        </div>
+      </nav>
+    </header>
+
+    <main class="main">
+      <!-- Main navigation / dashboard -->
+      <section id="dashboard" class="panel">
+        <h2 class="panel-title">لوحة التحكم</h2>
+        <div class="grid">
+          <button class="nav-card" data-page="entry">إدخال إذن</button>
+          <button class="nav-card" data-page="stock">كشف رصيد الأصناف</button>
+          <button class="nav-card" data-page="addItem">إضافة صنف</button>
+          <button class="nav-card" data-page="addWarehouse">إضافة مخزن / مورد</button>
+          <button class="nav-card" data-page="searchPerm">بحث و تعديل و حذف إذن</button>
+          <button class="nav-card" data-page="itemCard">كارتة الصنف</button>
+        </div>
+      </section>
+
+      <!-- Permission Entry Page -->
+      <section id="page-entry" class="panel page hidden">
+        <button class="back-btn" data-page="dashboard">◀ عودة</button>
+        <h2 class="panel-title">إدخال إذن</h2>
+
+        <form id="permForm" class="form">
+          <div class="form-row">
+            <label>رقم الإذن</label>
+            <input type="text" id="permNumber" placeholder="أدخل رقم الإذن" required>
+            <label>التاريخ</label>
+            <input type="date" id="permDate">
+          </div>
+
+          <div class="form-row">
+            <label>المخزن</label>
+            <select id="permStore"></select>
+
+            <label>نوع الإذن</label>
+            <select id="permType">
+              <option value="إذن إضافة">إذن إضافة</option>
+              <option value="إذن صرف">إذن صرف</option>
+              <option value="إذن خصم معدة">إذن خصم معدة</option>
+              <option value="إذن تحويل">إذن تحويل</option>
+              <option value="إذن ارتجاع">إذن ارتجاع</option>
+            </select>
+          </div>
+
+          <div class="form-row">
+            <label>من موقع</label>
+            <select id="permFrom"></select>
+
+            <label>إلى موقع</label>
+            <select id="permTo"></select>
+          </div>
+
+          <div class="form-row">
+            <label>رقم الإذن الفرعي</label>
+            <input type="text" id="permSubNumber" placeholder="رقم الإذن الفرعي (اختياري)">
+          </div>
+
+          <h3>بنود الإذن (حتى 25 بند)</h3>
+          <div id="linesContainer" class="lines">
+            <!-- JS will inject up to 25 line rows -->
+          </div>
+
+          <div class="form-actions">
+            <button type="button" id="addLineBtn" class="btn">إضافة بند</button>
+            <span id="linesCount" class="muted">0 / 25</span>
+            <button type="submit" id="postPermBtn" class="btn primary">ترحيل البيانات</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Stock Balance Page -->
+      <section id="page-stock" class="panel page hidden">
+        <button class="back-btn" data-page="dashboard">◀ عودة</button>
+        <h2 class="panel-title">كشف رصيد الأصناف</h2>
+
+        <div class="filter-row">
+          <label>المجموعة</label>
+          <select id="filterGroup">
+            <option value="">-- الكل --</option>
+          </select>
+
+          <label>الصنف</label>
+          <select id="filterItem">
+            <option value="">-- الكل --</option>
+          </select>
+
+          <label>نوع الإذن</label>
+          <select id="filterPermType">
+            <option value="">-- الكل --</option>
+            <option>إذن إضافة</option>
+            <option>إذن صرف</option>
+            <option>إذن خصم معدة</option>
+            <option>إذن تحويل</option>
+            <option>إذن ارتجاع</option>
+          </select>
+        </div>
+
+        <div class="filter-row">
+          <label>من تاريخ</label>
+          <input type="date" id="filterFrom">
+          <label>إلى تاريخ</label>
+          <input type="date" id="filterTo">
+          <button class="btn" id="applyFilters">تصفية</button>
+          <button class="btn" id="clearFilters">مسح</button>
+        </div>
+
+        <div class="table-wrap">
+          <table id="stockTable" class="data-table">
+            <thead>
+              <tr>
+                <th>الصنف</th>
+                <th>الوحدة</th>
+                <th>المجموعة</th>
+                <th>النوع</th>
+                <th>الرصيد الحالي</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Add Item Page -->
+      <section id="page-addItem" class="panel page hidden">
+        <button class="back-btn" data-page="dashboard">◀ عودة</button>
+        <h2 class="panel-title">إضافة صنف</h2>
+
+        <form id="addItemForm" class="form">
+          <div class="form-row">
+            <label>اسم الصنف</label>
+            <input type="text" id="itemName" required placeholder="اسم الصنف">
+            <label>الوحدة</label>
+            <input type="text" id="itemUnit" required placeholder="مثال: قطعة / متر / كجم">
+          </div>
+
+          <div class="form-row">
+            <label>النوع</label>
+            <select id="itemType">
+              <option value="عدة">عدة</option>
+              <option value="مستهلكات">مستهلكات</option>
+            </select>
+
+            <label>المجموعة</label>
+            <select id="itemGroup"></select>
+            <input type="text" id="newGroupInput" placeholder="اضف مجموعة جديدة">
+            <button type="button" id="addGroupBtn" class="btn small">إضافة مجموعة</button>
+          </div>
+
+          <div class="form-row">
+            <label>الكمية الابتدائية (اختياري)</label>
+            <input type="number" id="itemInitial" min="0" step="1" placeholder="0">
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn primary">حفظ الصنف</button>
+          </div>
+        </form>
+
+        <h3>قائمة الأصناف</h3>
+        <div class="table-wrap">
+          <table id="itemsTable" class="data-table">
+            <thead>
+              <tr><th>الاسم</th><th>الوحدة</th><th>النوع</th><th>المجموعة</th><th>الرصيد</th><th>إجراءات</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <div class="import-note muted">
+          ملاحظة: لاستيراد من Excel قم برفع ملف CSV بأعمدة: <code>name,unit,type,group,initial_qty</code>.
+        </div>
+      </section>
+
+      <!-- Add Warehouse Page -->
+      <section id="page-addWarehouse" class="panel page hidden">
+        <button class="back-btn" data-page="dashboard">◀ عودة</button>
+        <h2 class="panel-title">إضافة مخزن / مورد</h2>
+
+        <form id="addWarehouseForm" class="form">
+          <div class="form-row">
+            <label>اسم المخزن/المورد</label>
+            <input type="text" id="whName" required placeholder="اسم المخزن أو المورد">
+            <label>وصف (اختياري)</label>
+            <input type="text" id="whDesc" placeholder="وصف">
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn primary">حفظ</button>
+          </div>
+        </form>
+
+        <h3>قائمة المخازن / الموردين</h3>
+        <div class="table-wrap">
+          <table id="whTable" class="data-table">
+            <thead><tr><th>الاسم</th><th>الوصف</th><th>إجراءات</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Search / Edit / Delete Permission Page -->
+      <section id="page-searchPerm" class="panel page hidden">
+        <button class="back-btn" data-page="dashboard">◀ عودة</button>
+        <h2 class="panel-title">بحث و تعديل و حذف إذن</h2>
+
+        <div class="form-row">
+          <label>بحث برقم الإذن</label>
+          <input type="text" id="searchPermNumber" placeholder="رقم الإذن">
+          <label>بحث باسم الصنف</label>
+          <input type="text" id="searchPermItem" placeholder="جزء من اسم الصنف">
+        </div>
+        <div class="form-row">
+          <label>نوع الإذن</label>
+          <select id="searchPermType">
+            <option value="">-- الكل --</option>
+            <option>إذن إضافة</option>
+            <option>إذن صرف</option>
+            <option>إذن خصم معدة</option>
+            <option>إذن تحويل</option>
+            <option>إذن ارتجاع</option>
+          </select>
+          <button id="searchPermBtn" class="btn">بحث</button>
+        </div>
+
+        <div class="table-wrap">
+          <table id="permsTable" class="data-table">
+            <thead><tr><th>رقم الإذن</th><th>النوع</th><th>المخزن</th><th>التاريخ</th><th>عدد البنود</th><th>إجراءات</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <!-- Edit modal (simple panel) -->
+        <div id="editPermPanel" class="modal hidden">
+          <div class="modal-inner">
+            <button class="close-modal" id="closeEdit">✖</button>
+            <h3>تعديل الإذن</h3>
+            <form id="editPermForm" class="form">
+              <!-- header fields -->
+              <div class="form-row">
+                <label>رقم الإذن</label><input type="text" id="editPermNumber" required>
+                <label>التاريخ</label><input type="date" id="editPermDate">
+              </div>
+              <div class="form-row">
+                <label>المخزن</label><select id="editPermStore"></select>
+                <label>نوع الإذن</label><select id="editPermType">
+                  <option>إذن إضافة</option><option>إذن صرف</option><option>إذن خصم معدة</option><option>إذن تحويل</option><option>إذن ارتجاع</option>
+                </select>
+              </div>
+              <div id="editLinesContainer" class="lines"></div>
+              <div class="form-actions">
+                <button type="button" id="editAddLine" class="btn">إضافة بند</button>
+                <button type="submit" class="btn primary">حفظ التعديل</button>
+                <button type="button" id="deletePermBtn" class="btn danger">حذف الإذن</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- Item Card Page -->
+      <section id="page-itemCard" class="panel page hidden">
+        <button class="back-btn" data-page="dashboard">◀ عودة</button>
+        <h2 class="panel-title">كارتة الصنف</h2>
+
+        <div class="form-row">
+          <label>اختر صنف</label>
+          <select id="cardItemSelect"><option value="">-- اختر صنف --</option></select>
+          <button id="showCardBtn" class="btn">عرض</button>
+        </div>
+
+        <div id="cardResult" class="table-wrap hidden">
+          <h3 id="cardTitle"></h3>
+          <table id="cardTable" class="data-table">
+            <thead><tr><th>البيان</th><th>دخول</th><th>خروج</th><th>الرصيد بعد الحركة</th><th>رقم الإذن</th><th>التاريخ</th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <div class="card-balance muted">الرصيد الحالي: <span id="cardBalance">0</span></div>
+        </div>
+      </section>
+
+    </main>
+
+    <footer class="footer">
+      <div>By Ahmed Elboshy — Intermaint</div>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
+    <script type="module" src="./script.js"></script>
+
+  </body>
+  
+</html>
